@@ -1,0 +1,147 @@
+package com.hungum.auth.kafka;
+
+import com.hungum.auth.service.AuthService;
+import com.hungum.common.dto.UserDto;
+import com.hungum.common.event.*;
+import com.hungum.common.dto.ProductDto;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+
+@Service
+public class KafkaProducerService {
+
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    // Тема для отправки почты
+    private final String SEND_MAIL_TOPIC = "send.mail";  // Тема для отправки писем
+    private final String USER_EXISTS_TOPIC = "user.exists"; // Тема для проверки существования пользователя
+    private final String USER_EXISTS_RESPONSE_TOPIC = "user.exists.response"; // Тема для ответа по существованию пользователя
+    private final String USER_DETAILS_REQUEST_TOPIC = "user.details.request"; // Тема для запроса данных пользователя
+    private final String USER_DETAILS_RESPONSE_TOPIC = "user.details.response"; // Тема для ответа с данными пользователя
+    private final String PRODUCT_REQUEST_TOPIC = "product.request";  // Тема для запроса данных о товаре
+    private final String PRODUCT_RESPONSE_TOPIC = "product.response";  // Тема для ответа с данными о товаре
+
+    // Для получения ответов
+    private CompletableFuture<Boolean> userExistsResponseFuture;
+    private CompletableFuture<UserDetailsResponseEvent> userDetailsResponseFuture;
+    private CompletableFuture<ProductDto> productResponseFuture;
+
+    private AuthService authService;
+
+    public KafkaProducerService(KafkaTemplate<String, Object> kafkaTemplate) {
+        this.kafkaTemplate = kafkaTemplate;
+    }
+
+    // Метод для отправки события о создании пользователя
+    public void sendUserCreatedEvent(UserCreatedEvent event) {
+        kafkaTemplate.send("user.created", event);
+    }
+
+    // Метод для отправки запроса о существовании пользователя
+    public boolean sendUserExistsEvent(UserExistsEvent event) {
+        userExistsResponseFuture = new CompletableFuture<>();  // создаем новый CompletableFuture
+
+        // Отправка запроса через Kafka
+        kafkaTemplate.send(USER_EXISTS_TOPIC, event);
+
+        try {
+            // Ожидаем ответ от Kafka Consumer
+            return userExistsResponseFuture.get();  // Блокируем до получения ответа
+        } catch (InterruptedException | ExecutionException e) {
+            // Обработка ошибок
+            e.printStackTrace();
+            return false;  // Если ошибка, возвращаем false
+        }
+    }
+
+    // Метод для отправки запроса на получение данных пользователя
+    public UserDetailsResponseEvent sendUserDetailsRequest(UserDetailsRequestEvent event) {
+        userDetailsResponseFuture = new CompletableFuture<>();  // создаем новый CompletableFuture
+
+        // Отправляем запрос через Kafka
+        kafkaTemplate.send(USER_DETAILS_REQUEST_TOPIC, event);
+
+        try {
+            // Ожидаем ответ от Kafka Consumer
+            return userDetailsResponseFuture.get();  // Блокируем до получения ответа
+        } catch (InterruptedException | ExecutionException e) {
+            // Обработка ошибок
+            e.printStackTrace();
+            return null;  // Если ошибка, возвращаем null
+        }
+    }
+
+    // Метод для отправки запроса на получение данных о товаре
+    public ProductDto sendProductRequestEvent(ProductRequestEvent event) {
+        productResponseFuture = new CompletableFuture<>();  // создаем новый CompletableFuture для получения ответа
+
+        // Отправляем запрос через Kafka
+        kafkaTemplate.send(PRODUCT_REQUEST_TOPIC, event);
+
+        try {
+            // Ожидаем ответ от Kafka Consumer
+            return productResponseFuture.get();  // Вернем объект ProductDto, полученный от Kafka Consumer
+        } catch (InterruptedException | ExecutionException e) {
+            // Обработка ошибок при получении ответа
+            e.printStackTrace();
+            return null;  // Если ошибка, возвращаем null
+        }
+    }
+
+    // Метод для отправки события на отправку письма
+    public void sendSendMailEvent(SendMailEvent event) {
+        // Отправляем событие через Kafka для отправки письма
+        kafkaTemplate.send(SEND_MAIL_TOPIC, event);
+    }
+
+    // Слушатель для получения ответа о существовании пользователя
+    @KafkaListener(topics = USER_EXISTS_RESPONSE_TOPIC, groupId = "auth-service-group")
+    public void listenUserExistsResponse(Boolean exists) {
+        // Когда получаем ответ от Consumer, завершаем CompletableFuture
+        userExistsResponseFuture.complete(exists);
+    }
+
+    // Слушатель для получения данных пользователя
+    @KafkaListener(topics = USER_DETAILS_RESPONSE_TOPIC, groupId = "auth-service-group")
+    public void listenUserDetailsResponse(UserDetailsResponseEvent response) {
+        // Когда получаем ответ от Consumer, завершаем CompletableFuture
+        userDetailsResponseFuture.complete(response);
+    }
+
+    // Слушатель для получения данных товара
+    @KafkaListener(topics = PRODUCT_RESPONSE_TOPIC, groupId = "cart-service-group")
+    public void listenProductResponse(ProductDto response) {
+        // Когда получаем ответ от Consumer, завершаем CompletableFuture
+        productResponseFuture.complete(response);
+    }
+    // Слушатель для получения запроса данных пользователя
+    @KafkaListener(topics = "user.details.request", groupId = "user-service-group")
+    public void listenUserDetailsRequest(UserDetailsRequestEvent request) {
+        try {
+            // Получаем данные пользователя через AuthService
+            Optional<UserDto> userDtoOptional = authService.getCurrentUser();
+
+            if (userDtoOptional.isPresent()) {
+                // Создаем событие с данными пользователя
+                UserDetailsResponseEvent response = new UserDetailsResponseEvent(userDtoOptional.get());
+
+                // Отправляем ответ через Kafka
+                kafkaTemplate.send("user.details.response", response);
+            } else {
+                // Если данные не найдены, отправляем ошибку или пустой ответ
+                // Можно вернуть ошибку или пустой объект, зависит от логики
+                kafkaTemplate.send("user.details.response", new UserDetailsResponseEvent(null));  // или отправить ошибку
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Если что-то пошло не так, можно отправить пустой ответ или обработать ошибку
+            kafkaTemplate.send("user.details.response", new UserDetailsResponseEvent(null));  // или отправить ошибку
+        }
+    }
+}

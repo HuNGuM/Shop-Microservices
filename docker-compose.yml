@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_KRAFT_MODE: "true"
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: "Mk3OEYBSD34fcwNTJENDM2Qk"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/var/lib/kafka/data  # Store Kafka logs on your local machine.
+    networks:
+      - app-network
+
+
+
+  # MongoDB
+  mongodb:
+    image: mongo:latest
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+    networks:
+      - app-network
+
+  # Redis
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+    depends_on:
+      - auth-service
+      - cart-service
+      - product-service
+      - user-service
+      - mail-service
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: auth-service
+    ports:
+      - "8081:8081"
+    networks:
+      - app-network
+
+  # Cart Service
+  cart-service:
+    build:
+      context: ./cart-service
+    container_name: cart-service
+    ports:
+      - "8082:8082"
+    networks:
+      - app-network
+
+  # Product Service
+  product-service:
+    build:
+      context: ./product-service
+    container_name: product-service
+    ports:
+      - "8083:8083"
+    networks:
+      - app-network
+
+  # User Service
+  user-service:
+    build:
+      context: ./user-service
+    container_name: user-service
+    ports:
+      - "8084:8084"
+    networks:
+      - app-network
+
+  # Mail Service
+  mail-service:
+    build:
+      context: ./mail-service
+    container_name: mail-service
+    ports:
+      - "8085:8085"
+    networks:
+      - app-network
+
+  # Frontend
+  frontend:
+    build:
+      context: C:/Users/HuNGuM/Desktop/mydir/ShopFrontend/SpringAngularEcommerce-frontend # Абсолютный путь для context
+      dockerfile: Dockerfile  # Путь к Dockerfile
+    ports:
+      - "4200:4200"  # Проброс порта для фронтенда
+    volumes:
+      - C:/Users/HuNGuM/Desktop/mydir/ShopFrontend/SpringAngularEcommerce-frontend:/app  # Монтируем папку фронтенда
+      - /app/node_modules  # Сохраняем node_modules внутри контейнера
+    working_dir: /app
+    command: npm start  # Запуск фронтенда через npm
+    depends_on:
+      - api-gateway  # Зависимость от API Gateway
+
+
+volumes:
+  mongo_data:
+
+networks:
+  app-network:
+    driver: bridge
